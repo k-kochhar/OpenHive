@@ -1,26 +1,22 @@
 import pygame
-import math
 import numpy as np
 import json
+import math
 import os
 from robot import Robot
-from motion_controller import ManualController, AutonomousController
+from motion_controller import AutonomousController
 
 # Initialize Pygame
 pygame.init()
 
 # Constants
-ROBOT_START_X = 100
-ROBOT_START_Y = 500
-ROBOT_START_ANGLE = 0  # Facing right
-
 WINDOW_WIDTH = 800
 WINDOW_HEIGHT = 600
 FPS = 60
 BACKGROUND_COLOR = (59, 55, 52)
 
 def load_path(filename):
-    """Load path from JSON file"""
+    """Load paths from JSON file"""
     try:
         # Get the directory where this script is located
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,50 +24,56 @@ def load_path(filename):
         
         with open(filepath, 'r') as f:
             data = json.load(f)
-            return data.get('waypoints', [])
+            return data.get('path1', []), data.get('path2', [])
     except FileNotFoundError:
         print(f"Path file {filepath} not found")
-        return []
+        return [], []
     except Exception as e:
         print(f"Error loading path: {e}")
-        return []
+        return [], []
 
-def draw_path(screen, path, current_idx=None):
+def draw_path(screen, path, current_idx=None, color=(100, 100, 200)):
     """Draw the path waypoints and lines"""
     if not path:
         return
     
     # Draw lines between waypoints
     if len(path) > 1:
-        pygame.draw.lines(screen, (200, 200, 200), False, path, 1)
+        pygame.draw.lines(screen, color, False, path, 2)
     
     # Draw waypoints
     for i, (x, y) in enumerate(path):
         if i == current_idx:
             # Current target waypoint - green
-            pygame.draw.circle(screen, (0, 255, 0), (int(x), int(y)), 5)
+            pygame.draw.circle(screen, (0, 255, 0), (int(x), int(y)), 6)
         else:
-            # Other waypoints - blue
-            pygame.draw.circle(screen, (200, 200, 200), (int(x), int(y)), 5)
+            # Other waypoints
+            pygame.draw.circle(screen, color, (int(x), int(y)), 3)
 
 def main():
     # Initialize screen
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SCALED)
     pygame.display.set_caption("Simulation")
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont(None, 24)
+    font = pygame.font.SysFont("monospace", 16)
     
-    # Initialize robot
-    robot = Robot(ROBOT_START_X, ROBOT_START_Y, angle=ROBOT_START_ANGLE)
+    # Load paths
+    path1, path2 = load_path('path.json')
     
-    # Load path and initialize controllers
-    path = load_path('path.json')
-    manual_controller = ManualController()
-    autonomous_controller = AutonomousController(path, robot.x, robot.y)
+    # Store initial positions
+    initial_x1 = path1[0][0] if path1 else 100
+    initial_y1 = path1[0][1] if path1 else 400
+    initial_x2 = path2[0][0] if path2 else 100
+    initial_y2 = path2[0][1] if path2 else 100
     
-    # Start in autonomous mode
-    mode = 'autonomous'
+    # Initialize robots with different marker IDs
+    robot1 = Robot(initial_x1, initial_y1, angle=0, marker_id=23)
+    robot2 = Robot(initial_x2, initial_y2, angle=0, marker_id=24)
     
+    # Initialize controllers for both robots
+    autonomous_controller1 = AutonomousController(path1, robot1.x, robot1.y)
+    autonomous_controller2 = AutonomousController(path2, robot2.x, robot2.y)
+
     # Run simulation loop
     running = True
     while running:
@@ -81,52 +83,55 @@ def main():
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                elif event.key == pygame.K_a:
-                    # Toggle autonomous mode
-                    if mode == 'manual':
-                        mode = 'autonomous'
-                        autonomous_controller.reset(robot.x, robot.y)
-                    else:
-                        mode = 'manual'
-                        robot.set_wheels(0, 0)
+                elif event.key == pygame.K_r:
+                    # Reset robots to initial positions
+                    robot1.x = initial_x1
+                    robot1.y = initial_y1
+                    robot1.angle = 0
+                    robot1.set_wheels(0, 0)
+                    robot2.x = initial_x2
+                    robot2.y = initial_y2
+                    robot2.angle = 0
+                    robot2.set_wheels(0, 0)
+                    # Reset controllers
+                    autonomous_controller1.reset(robot1.x, robot1.y)
+                    autonomous_controller2.reset(robot2.x, robot2.y)
         
-        # Get control inputs based on mode
-        if mode == 'manual':
-            keys = pygame.key.get_pressed()
-            key_dict = {
-                'forward': keys[pygame.K_f],
-                'left': keys[pygame.K_l],
-                'right': keys[pygame.K_r],
-                'stop': keys[pygame.K_s]
-            }
-            left, right = manual_controller.compute_wheel_speeds(robot, key_dict)
-            robot.set_wheels(left, right)
-        else:
-            left, right = autonomous_controller.compute_wheel_speeds(robot)
-            robot.set_wheels(left, right)
+        # Update both robots in autonomous mode
+        left1, right1 = autonomous_controller1.compute_wheel_speeds(robot1)
+        robot1.set_wheels(left1, right1)
         
-        # Update robot
-        robot.update(WINDOW_WIDTH, WINDOW_HEIGHT)
+        left2, right2 = autonomous_controller2.compute_wheel_speeds(robot2)
+        robot2.set_wheels(left2, right2)
+        
+        # Update both robots
+        robot1.update(WINDOW_WIDTH, WINDOW_HEIGHT)
+        robot2.update(WINDOW_WIDTH, WINDOW_HEIGHT)
         
         # Draw
         screen.fill(BACKGROUND_COLOR)
         
-        # Draw path if in autonomous mode
-        if mode == 'autonomous':
-            draw_path(screen, path, autonomous_controller.current_waypoint_idx)
+        # Draw both paths with different colors
+        draw_path(screen, path1, autonomous_controller1.current_waypoint_idx, color=(100, 150, 200))
+        draw_path(screen, path2, autonomous_controller2.current_waypoint_idx, color=(200, 150, 100))
         
-        robot.draw(screen)
+        # Draw both robots
+        robot1.draw(screen)
+        robot2.draw(screen)
         
-        # Simulate camera and detect markers
+        # Simulate camera and detect markers for both robots
         frame = pygame.surfarray.array3d(screen)
         frame = np.transpose(frame, (1, 0, 2))
-        robot.detect_marker(frame)
+        robot1.detect_marker(frame)
+        robot2.detect_marker(frame)
         
         # Display info
+        angle1_str = f"{math.degrees(robot1.detected_angle):.1f}" if robot1.detected_angle is not None else "--"
+        angle2_str = f"{math.degrees(robot2.detected_angle):.1f}" if robot2.detected_angle is not None else "--"
+        
         info_lines = [
-            f"X: {int(robot.x)}, Y: {int(robot.y)}",
-            f"Angle: {math.degrees(robot.detected_angle):.1f}°",
-
+            f"Robot 1: ({int(robot1.x)}, {int(robot1.y)}), Angle: {angle1_str}°",
+            f"Robot 2: ({int(robot2.x)}, {int(robot2.y)}), Angle: {angle2_str}°",
         ]
 
         # Draw info text

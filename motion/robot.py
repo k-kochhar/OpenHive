@@ -10,11 +10,10 @@ WHEEL_BASE = ROBOT_RADIUS * 1.5
 
 # ArUco parameters
 ARUCO_DICT = cv2.aruco.DICT_4X4_50
-MARKER_ID = 23
 MARKER_SIZE = 50
 
 
-def generate_robot_image():
+def generate_robot_image(marker_id):
     """Generate a single robot image with ArUco marker inside white circle"""
     size = int(ROBOT_RADIUS * 4)
     robot_surface = pygame.Surface((size, size), pygame.SRCALPHA)
@@ -25,7 +24,7 @@ def generate_robot_image():
         
     # Generate ArUco marker
     aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
-    marker_image = cv2.aruco.generateImageMarker(aruco_dict, MARKER_ID, MARKER_SIZE)
+    marker_image = cv2.aruco.generateImageMarker(aruco_dict, marker_id, MARKER_SIZE)
     marker_rgb = cv2.cvtColor(marker_image, cv2.COLOR_GRAY2RGB)
     marker_surface = pygame.surfarray.make_surface(np.transpose(marker_rgb, (1, 0, 2)))
     
@@ -42,18 +41,19 @@ def generate_robot_image():
 
 
 class Robot:
-    def __init__(self, x, y, angle=0):
+    def __init__(self, x, y, angle=0, marker_id=23):
         self.x = x
         self.y = y
         self.angle = angle  # orientation in radians
         self.left_wheel = 0  # -100, 0, or 100
         self.right_wheel = 0  # -100, 0, or 100
+        self.marker_id = marker_id
         
         # Detection data
         self.detected_angle = None
         
         # Generate robot image once
-        self.base_image = generate_robot_image()
+        self.base_image = generate_robot_image(marker_id)
         
     def set_wheels(self, left, right):
         """Set wheel speeds (-100, 0, or 100)"""
@@ -105,8 +105,8 @@ class Robot:
         
         corners, ids, _ = detector.detectMarkers(gray)
         
-        if ids is not None and MARKER_ID in ids:
-            idx = np.where(ids == MARKER_ID)[0][0]
+        if ids is not None and self.marker_id in ids:
+            idx = np.where(ids == self.marker_id)[0][0]
             marker_corners = corners[idx][0]
             
             # Calculate orientation from marker corners
