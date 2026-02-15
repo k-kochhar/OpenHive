@@ -15,11 +15,11 @@
   },
 
   "agents": {
-    "count": 3,
+    "count": 2,
     "types": [
       {
-        "type_id": "default",
-        "count": 3,
+        "type_id": "firefighting_bot",
+        "count": 2,
         "physical": {
           "size": {
             "note": "ESP-based wheeled robots with ArUco markers",
@@ -43,6 +43,8 @@
 
   "actions": {
     "built_in": [
+      "move_to(x, y) — navigate agent to target coordinates (handled by path planner)",
+      "stop() — halt agent immediately"
       "move_to(x, y) — navigate agent to target coordinates (handled by path planner)",
       "stop() — halt agent immediately"
     ],
@@ -88,10 +90,11 @@
     ],
     "static_obstacles": [],
     "dynamic_obstacles_expected": true
+    "dynamic_obstacles_expected": true
   },
 
   "missions": {
-    "type": "user_input",
+    "type": "bot_controlled",
     "config": {
       "user_input": {
         "enabled": true,
