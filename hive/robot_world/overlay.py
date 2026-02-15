@@ -32,6 +32,12 @@ MARKERS_JSON = ROBOT_SRC / "markers.json"
 ACTIVE_BOTS_JSON = ROBOT_SRC / "active_bots.json"
 SCREENSHOT_PATH = ROBOT_SRC / "screenshot.png"
 STATE_JSON = HIVE_DIR / "files" / "state.json"
+TASKS_JSON = HIVE_DIR / "files" / "tasks.json"
+
+# Command input state
+_input_text = ""
+_input_active = False
+INPUT_BAR_H = 40
 
 GRID_SIZE = 32  # must match actions.py
 
@@ -252,9 +258,99 @@ def draw_overlay(frame, markers, robots, active_bots):
     return frame
 
 
+def add_task(task_text):
+    """Add a task to the task queue."""
+    tasks = []
+    if TASKS_JSON.exists():
+        text = TASKS_JSON.read_text().strip()
+        if text:
+            try:
+                tasks = json.loads(text)
+            except json.JSONDecodeError:
+                tasks = []
+    tasks.append(task_text)
+    TASKS_JSON.write_text(json.dumps(tasks, indent=2))
+
+
+def draw_input_bar(frame):
+    """Draw a command input bar at the bottom of the frame."""
+    h, w = frame.shape[:2]
+    bar_y = h
+    # Extend frame to add input bar
+    bar = np.zeros((INPUT_BAR_H, w, 3), dtype=np.uint8)
+    bar[:] = (40, 40, 40)
+
+    # Draw border line
+    cv2.line(bar, (0, 0), (w, 0), (100, 100, 100), 1)
+
+    # Prompt
+    if _input_active:
+        prefix = "> "
+        color = (0, 255, 0)
+    else:
+        prefix = "Press TAB to type command > "
+        color = (150, 150, 150)
+
+    display = prefix + _input_text
+    # Cursor blink
+    if _input_active and int(cv2.getTickCount() / cv2.getTickFrequency() * 2) % 2:
+        display += "|"
+
+    cv2.putText(bar, display, (10, 28),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1, cv2.LINE_AA)
+
+    return np.vstack([frame, bar])
+
+
+def handle_key(key):
+    """Handle keyboard input for the command bar. Returns True if should quit."""
+    global _input_text, _input_active
+
+    if key == -1:
+        return False
+
+    # TAB toggles input mode
+    if key == 9:  # TAB
+        _input_active = not _input_active
+        if not _input_active:
+            _input_text = ""
+        return False
+
+    if not _input_active:
+        if key == ord("q"):
+            return True
+        return False
+
+    # ENTER — submit command
+    if key in (13, 10):
+        if _input_text.strip():
+            add_task(_input_text.strip())
+            print(f"[overlay] Task added: {_input_text.strip()}")
+            _input_text = ""
+        _input_active = False
+        return False
+
+    # ESCAPE — cancel
+    if key == 27:
+        _input_text = ""
+        _input_active = False
+        return False
+
+    # BACKSPACE
+    if key in (8, 127):
+        _input_text = _input_text[:-1]
+        return False
+
+    # Regular character
+    if 32 <= key < 127:
+        _input_text += chr(key)
+
+    return False
+
+
 def main():
     camera = Camera(video_source=0, marker_id=None)
-    print("[overlay] Camera started. Press 'q' to quit.")
+    print("[overlay] Camera started. Press TAB to type commands, 'q' to quit.")
 
     try:
         while True:
@@ -282,8 +378,12 @@ def main():
             # Draw paths + robot arrows on top
             frame = draw_overlay(frame, markers, robots, active_bots)
 
+            # Draw input bar at bottom
+            frame = draw_input_bar(frame)
+
             cv2.imshow("Robot World", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            key = cv2.waitKey(1) & 0xFF
+            if handle_key(key):
                 break
 
     except KeyboardInterrupt:

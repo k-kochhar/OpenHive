@@ -326,17 +326,21 @@ def _generate_waypoints(start, target, step_size=40):
         cell_w = frame_w / FULL_GRID
         cell_h = frame_h / FULL_GRID
 
-        pixel_path = pf.find_path_pixel(
+        # Use find_path directly with grid coords (not find_path_pixel)
+        # since cell_w != cell_h and find_path_pixel assumes square cells
+        grid_path = pf.find_path(
             binary_grid,
-            start_xy=(start[0], start[1]),
-            goal_xy=(target[0], target[1]),
-            grid_origin=(0, 0),
-            cell_size=min(cell_w, cell_h),
+            start=(s_row, s_col),
+            goal=(t_row, t_col),
         )
 
-        if pixel_path:
-            # Convert tuples to lists, skip start
-            waypoints = [[p[0], p[1]] for p in pixel_path[1:]]
+        if grid_path:
+            # Convert grid (row,col) back to pixel (x,y), skip start
+            waypoints = []
+            for r, c in grid_path[1:]:
+                px = c * cell_w + cell_w / 2
+                py = r * cell_h + cell_h / 2
+                waypoints.append([px, py])
             waypoints[-1] = [float(target[0]), float(target[1])]
             print(f"[pathfind] Neural A* path: {len(waypoints)} waypoints")
             return waypoints
@@ -535,13 +539,10 @@ def stop(bot_id=0):
 
 def push_and_exit(bot_id=0):
     """
-    Push an obstacle out of the area. Finds the nearest boundary point
-    from the bot's current position and drives straight there, pushing
-    whatever is in front of it off the edge.
-
-    Use this after moving the bot to an obstacle — call push_and_exit
-    to shove it out. The path is a straight line (no pathfinding),
-    so obstacles along the way are ignored.
+    Three-step obstacle removal:
+      1. Navigate to the obstacle using neural heuristic A* (avoids other obstacles)
+      2. Align to face the obstacle
+      3. March straight through it to the boundary
 
     Args:
         bot_id: which robot to use (0, 1, or 2)
@@ -556,34 +557,101 @@ def push_and_exit(bot_id=0):
         return f"Bot {bot_id} not detected — cannot push_and_exit"
 
     bx, by = info["center"]
-    angle = info["orientation_rad"]
     frame_w, frame_h = _get_frame_size()
+    cell_w = frame_w / FULL_GRID
+    cell_h = frame_h / FULL_GRID
 
-    # Drive straight in the bot's current facing direction until hitting a boundary
-    dx = math.cos(angle)
-    dy = math.sin(angle)
+    # --- Find nearest obstacle ---
+    try:
+        world = _detect_world_state()
+        grid = np.array(world["matrix"], dtype=int)
+    except Exception as e:
+        return f"Cannot detect obstacles: {e}"
 
-    # Ray-march to frame edge
-    t_max = max(frame_w, frame_h) * 2
-    for step in range(1, int(t_max)):
-        ex = bx + dx * step
-        ey = by + dy * step
-        if ex <= 0 or ex >= frame_w or ey <= 0 or ey >= frame_h:
-            target = [float(max(0, min(ex, frame_w))), float(max(0, min(ey, frame_h)))]
-            break
+    bot_r = int(by / frame_h * FULL_GRID)
+    bot_c = int(bx / frame_w * FULL_GRID)
+    bot_r = max(0, min(bot_r, FULL_GRID - 1))
+    bot_c = max(0, min(bot_c, FULL_GRID - 1))
+
+    obs_cells = np.argwhere(grid == CELL_OBSTACLE)
+    if len(obs_cells) == 0:
+        return "No obstacles detected"
+
+    dists = np.abs(obs_cells[:, 0] - bot_r) + np.abs(obs_cells[:, 1] - bot_c)
+    nearest_idx = np.argmin(dists)
+    obs_r, obs_c = obs_cells[nearest_idx]
+    obs_px = obs_c * cell_w + cell_w / 2
+    obs_py = obs_r * cell_h + cell_h / 2
+    print(f"[push] Nearest obstacle at grid ({obs_r},{obs_c}), pixel ({obs_px:.0f},{obs_py:.0f})")
+
+    # Direction from obstacle outward to boundary
+    dx = obs_px - bx
+    dy = obs_py - by
+    d = math.sqrt(dx**2 + dy**2)
+    if d > 1:
+        dx /= d
+        dy /= d
     else:
-        target = [float(bx + dx * t_max), float(by + dy * t_max)]
+        dx, dy = 1.0, 0.0
 
-    # Straight-line waypoints (no pathfinding — push through obstacles)
-    sx, sy = bx, by
-    tdx, tdy = target[0] - sx, target[1] - sy
-    dist = math.sqrt(tdx**2 + tdy**2)
-    n_steps = max(1, int(dist / 40))
-    path = []
+    # --- Find approach point: a free cell adjacent to the obstacle, on the bot's side ---
+    approach_r = int(obs_r - dy / (abs(dy) + 1e-6) * 2) if abs(dy) > abs(dx) else obs_r
+    approach_c = int(obs_c - dx / (abs(dx) + 1e-6) * 2) if abs(dx) >= abs(dy) else obs_c
+    # Clamp and make sure it's free — search outward if needed
+    for radius in range(0, 10):
+        for dr in range(-radius, radius + 1):
+            for dc in range(-radius, radius + 1):
+                nr, nc = approach_r + dr, approach_c + dc
+                if (0 <= nr < FULL_GRID and 0 <= nc < FULL_GRID
+                        and grid[nr, nc] != CELL_OBSTACLE):
+                    approach_r, approach_c = nr, nc
+                    radius = 999
+                    break
+            if radius == 999:
+                break
+        if radius == 999:
+            break
+
+    approach_px = approach_c * cell_w + cell_w / 2
+    approach_py = approach_r * cell_h + cell_h / 2
+
+    # STEP 1: Neural A* path from bot to approach point (obstacle-aware)
+    path_to_obstacle = _generate_waypoints([bx, by], [approach_px, approach_py])
+    print(f"[push] Step 1: {len(path_to_obstacle)} waypoints to approach point")
+
+    # STEP 2: Alignment waypoint — short step toward the obstacle to rotate and face it
+    align_x = approach_px + dx * 15
+    align_y = approach_py + dy * 15
+
+    # STEP 3: Straight march from obstacle through to the boundary
+    boundary_target = None
+    for step in range(1, int(max(frame_w, frame_h) * 2)):
+        ex = obs_px + dx * step
+        ey = obs_py + dy * step
+        if ex <= 0 or ex >= frame_w or ey <= 0 or ey >= frame_h:
+            boundary_target = [
+                float(max(0, min(ex, frame_w))),
+                float(max(0, min(ey, frame_h))),
+            ]
+            break
+    if boundary_target is None:
+        boundary_target = [float(max(0, min(obs_px + dx * 500, frame_w))),
+                           float(max(0, min(obs_py + dy * 500, frame_h)))]
+
+    # Straight-line waypoints from alignment through to boundary
+    sx, sy = align_x, align_y
+    tdx, tdy = boundary_target[0] - sx, boundary_target[1] - sy
+    march_dist = math.sqrt(tdx**2 + tdy**2)
+    n_steps = max(1, int(march_dist / 40))
+    march_path = []
     for i in range(1, n_steps + 1):
         frac = i / n_steps
-        path.append([sx + tdx * frac, sy + tdy * frac])
-    path[-1] = target
+        march_path.append([sx + tdx * frac, sy + tdy * frac])
+    march_path[-1] = boundary_target
+
+    # Combine: navigate → align → march
+    path = path_to_obstacle + [[align_x, align_y]] + march_path
+    print(f"[push] Full path: {len(path)} waypoints (navigate + align + march)")
 
     # Update path.json
     with _path_json_lock:

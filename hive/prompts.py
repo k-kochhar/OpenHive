@@ -154,3 +154,17 @@ RULES:
 4. Only use new_tasks for genuinely sequential follow-ups that depend on the current task completing first (e.g. "check if all items collected" after a collection sweep). Never use new_tasks to split parallelizable work.
 
 5. Be strategic about bot assignment. Consider which bot is closest to each target to minimize total movement."""
+
+verify_prompt = """You are verifying whether a robot swarm task was completed successfully.
+
+You are given:
+- The original task
+- A screenshot of the current state after execution
+
+Look at the screenshot carefully. Was the task completed as expected?
+
+Respond with ONLY a JSON object:
+{
+  "completed": true/false,
+  "reason": "<brief explanation>"
+}"""

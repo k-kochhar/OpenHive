@@ -31,7 +31,7 @@ import inspect
 from pathlib import Path
 
 from ohm import chat
-from prompts import init_prompt, action_prompt
+from prompts import init_prompt, action_prompt, verify_prompt
 
 HIVE_DIR = Path(__file__).parent
 TASKS_FILE = HIVE_DIR / "files" / "tasks.json"
@@ -248,6 +248,35 @@ def execute_task(task, world_doc, state, available_actions):
     return parsed.get("new_tasks", [])
 
 
+def verify_task(task):
+    """Check if a task was completed by sending a fresh screenshot to the LLM."""
+    screenshot_b64 = None
+    screenshot_path = getattr(_actions_module, "SCREENSHOT_PATH", None)
+    if screenshot_path and screenshot_path.exists():
+        try:
+            screenshot_b64 = base64.b64encode(screenshot_path.read_bytes()).decode("utf-8")
+        except Exception:
+            return True  # can't verify without screenshot, assume done
+
+    if not screenshot_b64:
+        return True
+
+    message = f"{verify_prompt}\n\nTASK: {json.dumps(task)}"
+    response = chat(DEFAULT_MODEL, message, image_b64=screenshot_b64)
+
+    try:
+        start = response.index("{")
+        end = response.rindex("}") + 1
+        parsed = json.loads(response[start:end])
+        completed = parsed.get("completed", True)
+        reason = parsed.get("reason", "")
+        print(f"[verify] {'PASS' if completed else 'FAIL'}: {reason}")
+        return completed
+    except (ValueError, json.JSONDecodeError):
+        print(f"[verify] Could not parse response, assuming complete")
+        return True
+
+
 def input_thread():
     """Background thread that reads user input and adds tasks."""
     print("[input] Type a command to add a task (or 'quit' to exit):\n")
@@ -329,6 +358,13 @@ def main():
                 print(f"[loop] Executing task: {task}")
 
                 new_tasks = execute_task(task, world_doc, state, available_actions)
+
+                # Wait a moment for bots to settle, then verify
+                time.sleep(2)
+                refresh_state()
+                if not verify_task(task):
+                    print(f"[loop] Task not completed — re-adding: {task}")
+                    tasks.insert(0, task)
 
                 if new_tasks:
                     tasks.extend(new_tasks)
