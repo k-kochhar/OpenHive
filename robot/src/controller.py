@@ -22,7 +22,10 @@ async def main():
         print("Not connected")
     
     last_command_time = time.time()
-    command_interval = 0.25
+    command_interval = 0.1
+    is_rotating = False
+    rotation_end_time = 0
+    post_rotation_wait_cycles = 0
     
     try:
         while True:
@@ -49,18 +52,48 @@ async def main():
                     path_follower.initialize(robot_x, robot_y)
                     path_follower_initialized = True
                 
-                # Get command for robot (computed every frame)
-                current_command = path_follower.get_command(robot_x, robot_y, robot_angle_rad)
                 target_idx = path_follower.get_current_waypoint_idx()
                 
-                # Send command every command_interval seconds
                 current_time = time.time()
-                if current_time - last_command_time >= command_interval:
+                
+                # Check if we're in the middle of a rotation
+                if is_rotating and current_time < rotation_end_time:
+                    pass
+
+                elif is_rotating and current_time >= rotation_end_time:
+                    # Rotation finished
+                    is_rotating = False
+
+                    # Pause for a bit
+                    post_rotation_wait_cycles = 2
                     if connected:
-                        await robot.send_command(current_command)
-                    print(f"Marker {marker_id}: Pos=({robot_x:.1f}, {robot_y:.1f}), "
-                          f"Angle={info['orientation_deg']:.1f}°, Command={current_command}")
-                    last_command_time = current_time
+                        await robot.send_command("S")
+
+                # Reduce cycles
+                elif post_rotation_wait_cycles > 0:
+                    post_rotation_wait_cycles -= 1
+
+                # Normal operation
+                else:
+                    current_command, rotation_time = path_follower.get_command(robot_x, robot_y, robot_angle_rad)
+                    
+                    # Send command based on interval
+                    if current_time - last_command_time >= command_interval:
+                        if rotation_time is not None:
+                            # Time-based rotation
+                            if connected:
+                                await robot.send_command(current_command)
+                            is_rotating = True
+                            rotation_end_time = current_time + rotation_time
+                            print(f"Marker {marker_id}: Rotating {current_command} for {rotation_time:.2f}s")
+                            last_command_time = current_time
+                        else:
+                            # Normal forward/stop command
+                            if connected:
+                                await robot.send_command(current_command)
+                            print(f"Marker {marker_id}: Pos=({robot_x:.1f}, {robot_y:.1f}), "
+                                  f"Angle={info['orientation_deg']:.1f}°, Command={current_command}")
+                            last_command_time = current_time
             
             # Draw trajectory with target waypoint highlighted
             frame = draw_trajectory(frame, path, target_idx)
