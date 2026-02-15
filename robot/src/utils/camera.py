@@ -8,13 +8,15 @@ class Camera:
     Camera class for ArUco marker detection.
     """
     
-    def __init__(self, video_source=0):
+    def __init__(self, video_source=0, marker_id=None):
         """
         Initialize camera with ArUco detector
         
         Args:
             video_source: Camera index (0 for default) or video file path
+            marker_id: Specific marker ID to track (None for all markers)
         """
+        self.marker_id = marker_id
         self.video_source = video_source
         self.cap = cv2.VideoCapture(video_source)
         
@@ -91,11 +93,13 @@ class Camera:
                 
                 angle_deg = np.degrees(angle_rad)
                 
-                markers[marker_id] = {
-                    'center': (center_x, center_y),
-                    'orientation_deg': float(angle_deg),
-                    'orientation_rad': float(angle_rad)
-                }
+                # Only include if no filter or matches filter
+                if self.marker_id is None or marker_id == self.marker_id:
+                    markers[marker_id] = {
+                        'center': (center_x, center_y),
+                        'orientation_deg': float(angle_deg),
+                        'orientation_rad': float(angle_rad)
+                    }
         
         return frame, markers
     

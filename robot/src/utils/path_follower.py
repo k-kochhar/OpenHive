@@ -4,22 +4,18 @@ import math
 class PathFollower:
     """Path following controller that returns simple movement commands"""
     
-    def __init__(self, path, waypoint_threshold=50, angle_threshold=0.4):
+    def __init__(self, path, waypoint_threshold=50, angle_threshold=0.6):
         """
         Args:
             path: List of (x, y) waypoint tuples
             waypoint_threshold: Distance at which a waypoint is considered reached
-            angle_threshold: Angle error threshold (radians) to start moving forward (0.4 rad ≈ 23°)
+            angle_threshold: Angle error threshold (radians) to start moving forward (0.6 rad ≈ 34°)
         """
         self.path = path
         self.waypoint_threshold = waypoint_threshold
         self.angle_threshold = angle_threshold
         self.current_waypoint_idx = 0
         self.finished = False
-        
-        # Time-based rotation parameters
-        self.rotation_time_per_360 = 5
-        self.degrees_per_second = 360.0 / self.rotation_time_per_360
     
     def initialize(self, robot_x, robot_y):
         """
@@ -52,12 +48,10 @@ class PathFollower:
             robot_angle_rad: Robot orientation in radians
         
         Returns:
-            tuple: (command, rotation_time) where:
-                - command: "F" (forward), "L" (left), "R" (right), "S" (stop)
-                - rotation_time: seconds to execute rotation (None if not rotating)
+            str: "F" (forward), "L" (left), "R" (right), "S" (stop)
         """
         if not self.path:
-            return "S", None
+            return "S"
         
         # Check if robot is at the last waypoint - if so, stop
         last_waypoint_x, last_waypoint_y = self.path[-1]
@@ -66,7 +60,7 @@ class PathFollower:
         if dist_to_end < self.waypoint_threshold:
             self.finished = True
             self.current_waypoint_idx = len(self.path) - 1
-            return "S", None
+            return "S"
         
         # Otherwise, ensure we're following the path
         self.finished = False
@@ -88,7 +82,7 @@ class PathFollower:
             if self.current_waypoint_idx >= len(self.path):
                 # At the end
                 self.finished = True
-                return "S", None
+                return "S"
             # Get next waypoint
             target_x, target_y = self.path[self.current_waypoint_idx]
             dx = target_x - robot_x
@@ -113,19 +107,16 @@ class PathFollower:
         while angle_error < -math.pi:
             angle_error += 2 * math.pi
         
-        # Two-state control: rotate then drive
+        # Simple control: rotate if not aligned, move forward if aligned
         if abs(angle_error) > self.angle_threshold:
-            # Not aligned: time-based rotation
-            angle_error_degrees = abs(math.degrees(angle_error))
-            rotation_time = angle_error_degrees / self.degrees_per_second
-            
+            # Not aligned: turn left or right
             if angle_error > 0:
-                return "R", rotation_time  # Turn right
+                return "R"  # Turn right
             else:
-                return "L", rotation_time  # Turn left
+                return "L"  # Turn left
         else:
             # Aligned: drive straight forward
-            return "F", None
+            return "F"
     
     def get_current_waypoint_idx(self):
         """Get the index of the current target waypoint"""

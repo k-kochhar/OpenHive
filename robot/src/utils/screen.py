@@ -4,18 +4,36 @@ import os
 import numpy as np
 
 
-def load_path(filename='path.json'):
-    """Load trajectory from JSON file"""
+def load_path(filename='path.json', marker_id=None):
+    """Load trajectory from JSON file
+    
+    Args:
+        filename: Path to JSON file
+        marker_id: Specific marker ID to load path for (None for old format)
+    
+    Returns:
+        tuple: (path, device_id) or (path, None) for old format
+    """
     try:
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         filepath = os.path.join(script_dir, filename)
         
         with open(filepath, 'r') as f:
             data = json.load(f)
-            return data.get('path', [])
+            
+            # New format with multiple robots
+            if 'robots' in data and marker_id is not None:
+                marker_str = str(marker_id)
+                if marker_str in data['robots']:
+                    robot_data = data['robots'][marker_str]
+                    return robot_data.get('path', []), robot_data.get('device_id')
+                return [], None
+            
+            # Old format
+            return data.get('path', []), None
     except Exception as e:
         print(f"Error loading path: {e}")
-        return []
+        return [], None
 
 
 def draw_trajectory(frame, path, target_idx=None):

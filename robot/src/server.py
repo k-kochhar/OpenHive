@@ -38,6 +38,19 @@ async def handler(ws):
 
                 continue
 
+            # Handle targeted commands: TARGET:ESP1:F
+            if not is_robot and msg.startswith("TARGET:"):
+                parts = msg.split(":", 2)
+                if len(parts) == 3:
+                    _, target_device, command = parts
+                    if target_device in devices:
+                        try:
+                            await devices[target_device].send(command)
+                            print(f"Forwarded {command} -> {target_device}")
+                        except:
+                            devices.pop(target_device, None)
+                continue
+            
             # If message is a command (F, B, L, R, S), forward to all robots
             if not is_robot and msg in ["F", "B", "L", "R", "S"]:
                 dead = []

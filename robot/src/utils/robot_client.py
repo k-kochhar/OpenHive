@@ -5,10 +5,11 @@ import websockets
 class RobotClient:
     """WebSocket client for communicating with robot"""
     
-    def __init__(self, host="localhost", port=8765, device_id="ESP1"):
+    def __init__(self, host="localhost", port=8765, device_id="ESP1", target_device=None):
         self.host = host
         self.port = port
         self.device_id = device_id
+        self.target_device = target_device  # Which robot to send commands to
         self.uri = f"ws://{host}:{port}"
         self.websocket = None
         self.connected = False
@@ -44,7 +45,12 @@ class RobotClient:
             return False
         
         try:
-            await self.websocket.send(command)
+            # Send targeted command if target_device specified
+            if self.target_device:
+                message = f"TARGET:{self.target_device}:{command}"
+            else:
+                message = command
+            await self.websocket.send(message)
             return True
         except:
             self.connected = False
